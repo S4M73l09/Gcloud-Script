@@ -23,7 +23,7 @@ Todo a traves de un Script interactivo — No requiere pasos avanzados.
 📦 Gcloud-Scripts  
 ├── setup_vm.sh # Script de Automatizacion  
 ├── README.md  
-├── README.ES.md # Estas aqui
+├── README.ES.md # Estas aqui  
 └── terraform/ # Archivos de terraform generados  
 ├── backend.hcl  
 ├── main.tf  
@@ -76,10 +76,10 @@ Durante la ejecución, verás un menú como:
 * Debian 12  
   *projects/debian-cloud/global/images/family/debian-12*
 
-* Windows Server 2022
+* Windows Server 2022  
   *projects/windows-cloud/global/images/family/windows-2022*
 
-* Windows Server 2019
+* Windows Server 2019  
   *projects/windows-cloud/global/images/family/windows-2019*
 
 El script ajusta automáticamente:
@@ -92,7 +92,7 @@ Windows → abre RDP (3389/tcp) y etiqueta rdp.
 
 Disco: si eliges Windows y pones menos de 64 GB, sube a 64 GB (recomendado por comodidad).
 
-Metadatos: en Linux activa enable-oslogin=TRUE.
+Metadatos: en Linux activa *enable-oslogin=TRUE.*
 
 ## 🔌 Conexión a la VM
 

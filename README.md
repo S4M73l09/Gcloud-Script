@@ -18,11 +18,11 @@ All through a single interactive script — no advanced GCP knowledge required.
 
 ---
 
-## 📁 Repository structure
+## 📁 Repository structure  
 📦 Gcloud-Scripts  
-├── setup_vm.sh # Main automation script  
+├── setup_vm.sh - Main automation script  
 ├── README.md # You are here
-├── README.ES.md 
+├── README.ES.md  
 └── terraform/ # Generated Terraform files  
 ├── backend.hcl  
 ├── main.tf  
@@ -30,6 +30,7 @@ All through a single interactive script — no advanced GCP knowledge required.
 ├── outputs.tf  
 └── terraform.tfvar  
 └── Readme.md
+
 ---
 
 ## ⚙️ Requirements
@@ -75,10 +76,10 @@ During execution, you will see a menu like:
 * Debian 12  
   *projects/debian-cloud/global/images/family/debian-12*
 
-* Windows Server 2022
+* Windows Server 2022  
   *projects/windows-cloud/global/images/family/windows-2022*
 
-* Windows Server 2019
+* Windows Server 2019  
   *projects/windows-cloud/global/images/family/windows-2019*
 
 The script automatically adjusts:
@@ -91,7 +92,7 @@ Windows → Open RDP (3389/tcp) and label RDP.
 
 Disk: if you choose Windows and put less than 64 GB, go up to 64 GB (recommended for convenience).
 
-Metadata: on Linux activate enable-oslogin=TRUE.
+Metadata: on Linux activate *enable-oslogin=TRUE.*
 
 ## 🔌 Connection to the VM
 
