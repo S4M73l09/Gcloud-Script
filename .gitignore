@@ -1,0 +1,16 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform.tfvars
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+
+# Logs / temp
+*.log
+*.tmp
+*.bak
+
+# macOS / Linux junk
+.DS_Store
