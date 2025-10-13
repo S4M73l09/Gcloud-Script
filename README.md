@@ -21,7 +21,7 @@ All through a single interactive script — no advanced GCP knowledge required.
 ## 📁 Repository structure  
 📦 Gcloud-Scripts  
 ├── setup_vm.sh - Main automation script  
-├── README.md # You are here
+├── README.md # You are here  
 ├── README.ES.md  
 └── terraform/ # Generated Terraform files  
 ├── backend.hcl  
