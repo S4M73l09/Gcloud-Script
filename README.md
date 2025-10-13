@@ -18,15 +18,15 @@ All through a single interactive script — no advanced GCP knowledge required.
 ---
 
 ## 📁 Repository structure
-📦 Gcloud-Scripts
-├── setup_local_vm.sh # Main automation script
-├── README.md # You are here
-└── terraform/ # Generated Terraform files
-├── backend.hcl
-├── main.tf
-├── variables.tf
-├── outputs.tf
-└── terraform.tfvar
+📦 Gcloud-Scripts  
+├── setup_local_vm.sh # Main automation script  
+├── README.md # You are here  
+└── terraform/ # Generated Terraform files  
+├── backend.hcl  
+├── main.tf  
+├── variables.tf  
+├── outputs.tf  
+└── terraform.tfvar  
 
 ---
 
@@ -41,10 +41,10 @@ Before running:
 ## 🚀 Usage
 Clone and run the script:
 ```bash
-git clone https://github.com/S4M73l09/gcp-vm-bootstrap.git
-cd gcp-vm-bootstrap
-chmod +x setup_local_vm.sh
-./setup_local_vm.shs
+git clone https://github.com/S4M73l09/Gcloud-Scripts.git
+cd Gcloud-Scripts
+chmod +x setup_vm.sh
+./setup_vm.sh
 
 The script will:
 
@@ -103,5 +103,5 @@ and optionally delete the bucket and Service Account:
 - Include CMEK encryption support for the state bucket.
 
 - Parameterize for multiple environments (dev, stage, prod).
-
-<p align="center"> Made with ❤️ by <a href="https://github.com/S4M73l09">@S4M73l09</a> </p> ```
+```
+<p align="center"> Made with ❤️ by <a href="https://github.com/S4M73l09">@S4M73l09</a> </p>
