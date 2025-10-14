@@ -86,6 +86,8 @@ The script automatically adjusts:
 
 Firewall:
 
+*--test* Mode.
+
 Linux → Open SSH (22/tcp) and label SSH.
 
 Windows → Open RDP (3389/tcp) and label RDP.
@@ -116,6 +118,15 @@ Connection RPD:
 ```bash
 <PUBLIC_IP>:3389
 ```
+
+## ✅Test Mode --test  
+The script also contains a test mode where you can test how it works and have these files saved in temporary branches.  
+The script in *--test* mode shows precisely the temporary address where said files are displayed.  
+```bash  
+rm -r /tmp/tmp.*  
+```  
+This is responsible for deleting temporary folders created in general.  
+If you want to clean it one by one, use the same command but adding the path of the temporary folder you want to delete.  
 
 🧹 Clean up
 

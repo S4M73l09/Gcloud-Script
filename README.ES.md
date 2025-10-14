@@ -86,6 +86,8 @@ El script ajusta automáticamente:
 
 Firewall:
 
+Modo de prueba *--test*.
+
 Linux → abre SSH (22/tcp) y etiqueta ssh.
 
 Windows → abre RDP (3389/tcp) y etiqueta rdp.
@@ -116,6 +118,16 @@ Conectate por RPD:
 ```bash
 <IP_PUBLICA>:3389
 ```
+
+## ✅Modo prueba --test  
+El script contiene tambien un modo de test donde puedes probar su funcionamiento y que dichos archivos se guarden en ramas temporales.  
+El script en modo de *--test* muestra justamente la direccion temporal donde se muestra dichos archivos.
+```bash  
+rm -r /tmp/tmp.*  
+```  
+Esto se encarga de borrar las carpetas temporales creadas en general.  
+Si quieres limpiarla una por una, usa el mismo comando pero añadiendo la ruta de la carpeta temporal que quieres borrar.
+
 ## 🧹 Limpieza  
 Para destruir los recursos de Terraform:  
 ```bash
