@@ -202,13 +202,14 @@ if (-not $Test) {
 $baseDir = if ($Test) { $TerraformDir.FullName } else { Join-Path $PSScriptRoot "terraform" }
 New-Item -ItemType Directory -Force -Path $baseDir | Out-Null
 
-@"
+$backend_hcl = @"
 bucket  = "$bucket"
 prefix  = "global/state"
 impersonate_service_account = "$saEmail"
-"@ | Out-File (Join-Path $baseDir "backend.hcl") -Encoding utf8
+"@
+$backend_hcl | Out-File (Join-Path $baseDir "backend.hcl") -Encoding utf8
 
-@'
+$main_tf = @'
 terraform {
   required_version = ">= 1.5.0"
   backend "gcs" {}
@@ -280,9 +281,10 @@ resource "google_compute_instance" "vm" {
 output "vm_ip" {
   value = google_compute_instance.vm.network_interface[0].access_config[0].nat_ip
 }
-'@ | Out-File (Join-Path $baseDir "main.tf") -Encoding utf8
+'@
+$main_tf | Out-File (Join-Path $baseDir "main.tf") -Encoding utf8
 
-@'
+$variables_tf = @'
 variable "project_id"      { type = string }
 variable "region"          { type = string }
 variable "zone"            { type = string }
@@ -295,14 +297,16 @@ variable "ssh_cidr_allow"  { type = list(string) default = ["0.0.0.0/0"] }
 variable "rdp_cidr_allow"  { type = list(string) default = ["0.0.0.0/0"] }
 variable "machine_type"    { type = string  default = "e2-medium" }
 variable "disk_gb"         { type = number  default = 50 }
-'@ | Out-File (Join-Path $baseDir "variables.tf") -Encoding utf8
+'@
+$variables_tf | Out-File (Join-Path $baseDir "variables.tf") -Encoding utf8
 
-@'
+$outputs_tf = @'
 output "state_bucket" { value = terraform.backend.gcs.bucket }
 output "vm_ip"        { value = google_compute_instance.vm.network_interface[0].access_config[0].nat_ip }
-'@ | Out-File (Join-Path $baseDir "outputs.tf") -Encoding utf8
+'@
+$outputs_tf | Out-File (Join-Path $baseDir "outputs.tf") -Encoding utf8
 
-@"
+$tfvars = @"
 project_id     = "$project"
 region         = "$region"
 zone           = "$zone"
@@ -317,14 +321,15 @@ image   = "$image"
 
 ssh_cidr_allow = ["0.0.0.0/0"]
 rdp_cidr_allow = ["0.0.0.0/0"]
-"@ | Out-File (Join-Path $baseDir "terraform.tfvars") -Encoding utf8
+"@
+$tfvars | Out-File (Join-Path $baseDir "terraform.tfvars") -Encoding utf8
 
 Write-Host "`n[✓] Terraform files generados en: $baseDir`n"
 
 # ========== Terraform (init/plan/apply) ==========
 if ($Test) {
   Write-Host "[TEST] Saltando ejecución de Terraform (simulación)."
-  Write-Host "[TEST] Carpeta temporal: $TempRoot"
+Write-Host ('[TEST] Carpeta temporal: {0}' -f $TempRoot)
   return
 }
 
@@ -347,6 +352,7 @@ if (Confirm-Action "¿Aplicar ahora y crear VPC+Subnet+Firewall+VM?") {
     if ($ip) { Write-Host "`nSSH (OS Login):  gcloud compute ssh ${prefix}-vm --zone $zone" }
   }
 } else {
-  Write-Host "OK. No se aplicaron cambios."
+Write-Host 'OK. No se aplicaron cambios.'
 }
+
 
