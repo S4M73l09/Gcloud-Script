@@ -21,7 +21,8 @@ Todo a traves de un Script interactivo — No requiere pasos avanzados.
 
 ## 📁Estructura de repositorio  
 📦 Gcloud-Scripts  
-├── setup_vm.sh # Script de Automatizacion  
+├── setup_vm.sh  # Script de Automatizacion bash  
+├── setup_vm.ps1 # Script de Automatizacion Powershell  
 ├── README.md  
 ├── README.ES.md # Estas aqui  
 └── terraform/ # Archivos de terraform generados  
@@ -34,10 +35,10 @@ Todo a traves de un Script interactivo — No requiere pasos avanzados.
 
 ## ⚙️Requerimientos  
 Antes de ejecutarlo:
-- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)  
-- [Terraform](https://developer.hashicorp.com/terraform/downloads)
+- Instalacion en Linux o Windows (Añadido al PATH) [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)  
+- Instalacion en Linux o Windows (Añadido al PAth) [Terraform](https://developer.hashicorp.com/terraform/downloads)  
 - Un proyecto de Google Cloud disponible.  
-
+- Proyecto con facturacion habilitada.
 ---
 
 ## 🚀Uso  
@@ -47,7 +48,15 @@ git clone https://github.com/S4M73l09/Gcloud-Scripts.git
 cd Gcloud-Scripts
 chmod +x setup_vm.sh
 ./setup_vm.sh
-```
+```  
+En Powershell:  
+```powershell
+git clone https://github.com/S4M73l09/Gcloud-Scripts.git
+cd Gcloud-Scripts
+./setup_vm.ps1 -test #Para ejecutar el tipo Test
+./setup_vm.ps1 #Ejecucion normal
+```  
+
 El Script comenzara a:
 
 1: Correo para login en gcloud.  
@@ -82,23 +91,23 @@ Durante la ejecución, verás un menú como:
 * Windows Server 2019  
   *projects/windows-cloud/global/images/family/windows-2019*
 
-El script ajusta automáticamente:
+El script ajusta **automáticamente:**
 
-Firewall:
+1. Firewall
 
-Modo de prueba *--test*.
+2. Modo de prueba *--test*.
 
-Linux → abre SSH (22/tcp) y etiqueta ssh.
+3. Linux → abre SSH (22/tcp) y etiqueta ssh.
 
-Windows → abre RDP (3389/tcp) y etiqueta rdp.
+4. Windows → abre RDP (3389/tcp) y etiqueta rdp.
 
-Disco: si eliges Windows y pones menos de 64 GB, sube a 64 GB (recomendado por comodidad).
+5. Disco: si eliges Windows y pones menos de 64 GB, sube a 64 GB (recomendado por comodidad).
 
-Metadatos: en Linux activa *enable-oslogin=TRUE.*
+Metadatos: en Linux activa **enable-oslogin=TRUE.**
 
 ## 🔌 Conexión a la VM
 
-### 🔑 Linux (Ubuntu / Debian)
+#### 🔑 Linux (Ubuntu / Debian)
 El script habilita **OS Login**, así que puedes conectarte con:  
 ```bash  
 gcloud compute ssh <prefijo>-vm --zone <tu-zona>
@@ -109,7 +118,7 @@ ssh <tu_usuario>@<IP_PUBLICA>
 ```
 ⚙️ **Requiere que tu usuario tenga el rol *roles/compute.osLogin* o similar.**  
 
-### Windows Server (2022/2019)  
+#### Windows Server (2022/2019)  
 Una vez creada la VM, genera credenciales seguras:  
 ```bash
 gcloud compute reset-windows-password <prefijo>-vm --zone <tu-zona> --user <admin>
@@ -125,8 +134,12 @@ El script en modo de *--test* muestra justamente la direccion temporal donde se 
 ```bash  
 rm -r /tmp/tmp.*  
 ```  
+powershell  
+```powershell  
+Remove-Item "$env:TEMP\gcp-test-*" -Recurse -Force
+```  
 Esto se encarga de borrar las carpetas temporales creadas en general.  
-Si quieres limpiarla una por una, usa el mismo comando pero añadiendo la ruta de la carpeta temporal que quieres borrar.
+Si quieres limpiarla una por una, usa el mismo comando pero añadiendo la ruta de la carpeta temporal que quieres borrar.  
 
 ## 🧹 Limpieza  
 Para destruir los recursos de Terraform:  

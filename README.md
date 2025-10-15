@@ -20,7 +20,8 @@ All through a single interactive script — no advanced GCP knowledge required.
 
 ## 📁 Repository structure  
 📦 Gcloud-Scripts  
-├── setup_vm.sh - Main automation script  
+├── setup_vm.sh  #Main automation script bash  
+├── setup_vm.ps1 #Main automation script powershell 
 ├── README.md # You are here  
 ├── README.ES.md  
 └── terraform/ # Generated Terraform files  
@@ -35,10 +36,10 @@ All through a single interactive script — no advanced GCP knowledge required.
 
 ## ⚙️ Requirements
 Before running:
-- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
-- [Terraform](https://developer.hashicorp.com/terraform/downloads)
+- Installation on Linux or Windows (Added to PATH) [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)  
+- Installation on Linux or Windows (Added to PATH) [Terraform](https://developer.hashicorp.com/terraform/downloads)  
 - A Google Cloud project with billing enabled.
-
+- Project with billing enabled  
 ---
 
 ## 🚀 Usage
@@ -49,6 +50,14 @@ cd Gcloud-Scripts
 chmod +x setup_vm.sh
 ./setup_vm.sh
 ```
+Powershell:
+```Powershell
+git clone https://github.com/S4M73l09/Gcloud-Scripts.git
+cd Gcloud-Scripts
+./setup_vm.ps1 -test #to execute the test type  
+./setup_vm.ps1 #Normal execution  
+```
+
 The script will:
 
 1: Your google email in Gcloud.  
@@ -71,34 +80,34 @@ The script will:
 During execution, you will see a menu like:  
 
 * Ubuntu 22.04 LTS  
-  *projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts*
+  **projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts**
 
 * Debian 12  
-  *projects/debian-cloud/global/images/family/debian-12*
+  **projects/debian-cloud/global/images/family/debian-12**
 
 * Windows Server 2022  
-  *projects/windows-cloud/global/images/family/windows-2022*
+  **projects/windows-cloud/global/images/family/windows-2022**
 
 * Windows Server 2019  
-  *projects/windows-cloud/global/images/family/windows-2019*
+  **projects/windows-cloud/global/images/family/windows-2019**
 
-The script automatically adjusts:
+The script **automatically** adjusts:
 
-Firewall:
+1. Firewall:
 
-*--test* Mode.
+2. *--test* Mode.
 
-Linux → Open SSH (22/tcp) and label SSH.
+3. Linux → Open SSH (22/tcp) and label SSH.
 
-Windows → Open RDP (3389/tcp) and label RDP.
+4. Windows → Open RDP (3389/tcp) and label RDP.
 
-Disk: if you choose Windows and put less than 64 GB, go up to 64 GB (recommended for convenience).
+5. Disk: if you choose Windows and put less than 64 GB, go up to 64 GB (recommended for convenience).
 
-Metadata: on Linux activate *enable-oslogin=TRUE.*
+Metadata: on Linux activate **enable-oslogin=TRUE.**
 
 ## 🔌 Connection to the VM
 
-### 🔑Linux (Ubuntu / Debian)  
+#### 🔑Linux (Ubuntu / Debian)  
 The script enables **OS Login**, so you can connect with:  
 ```bash
 gcloud compute ssh <prefijo>-vm --zone <tu-zona>
@@ -109,7 +118,7 @@ ssh <your_user>@<Public_IP>
 ```  
 ⚙️ **Requires your user to have the role *roles/compute.osLogin* or similar.**  
 
-### Windows Server (2022/2019)
+#### Windows Server (2022/2019)
 Once the VM is created, it generates secure credentials:  
 ```bash  
 gcloud compute reset-windows-password <prefix>-vm --zone <your_zone> --user <admin>
@@ -125,6 +134,10 @@ The script in *--test* mode shows precisely the temporary address where said fil
 ```bash  
 rm -r /tmp/tmp.*  
 ```  
+powershell  
+```powershell
+Remove-Item "$env:TEMP\gcp-test-*" -Recurse -Force
+```  
 This is responsible for deleting temporary folders created in general.  
 If you want to clean it one by one, use the same command but adding the path of the temporary folder you want to delete.  
 
@@ -134,8 +147,7 @@ To destroy Terraform resources:
 ```bash
 cd terraform
 terraform destroy  
-```
-
+```  
 and optionally delete the bucket and Service Account:  
 ```bash  
 **gcloud storage rm -r gs://<bucket-name>**  
