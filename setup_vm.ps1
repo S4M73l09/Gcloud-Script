@@ -349,7 +349,7 @@ if (Confirm-Action "¿Aplicar ahora y crear VPC+Subnet+Firewall+VM?") {
     Write-Host "    gcloud compute reset-windows-password ${prefix}-vm --zone $zone --user admin"
     if ($ip) { Write-Host "    Conéctate por RDP a: $ip`:3389" }
   } else {
-    if ($ip) { Write-Host "`nSSH (OS Login):  gcloud compute ssh ${prefix}-vm --zone $zone" }
+    if ($ip) { Write-Host "SSH (OS Login): gcloud compute ssh $($prefix)-vm --zone $zone" }
   }
 } else {
 Write-Host 'OK. No se aplicaron cambios.'
