@@ -6,6 +6,31 @@
   genera Terraform (VPC, subred, firewall y VM Linux/Windows) y despliega.
   Incluye -Test para simular sin tocar GCP (genera archivos en TEMP).
 #>
+# --- AUTO-EJECUCIÓN SEGURA ---
+$policy = Get-ExecutionPolicy -Scope CurrentUser
+if ($policy -in @('Restricted','AllSigned')) {
+    Write-Host "[!] Tu política actual es '$policy', que impide ejecutar scripts."
+    Write-Host "Cambiando temporalmente a 'RemoteSigned'..."
+    try {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+        Write-Host "[✓] Política de ejecución actualizada a RemoteSigned." -ForegroundColor Green
+    } catch {
+        Write-Host "[x] No se pudo cambiar la política automáticamente. Intenta ejecutar como administrador." -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Desbloquear el propio script (por si fue descargado de Internet)
+$myPath = $MyInvocation.MyCommand.Definition
+if (Test-Path $myPath) {
+    try {
+        Unblock-File -Path $myPath -ErrorAction Stop
+        Write-Host "[✓] Script desbloqueado correctamente." -ForegroundColor Green
+    } catch {
+        Write-Host "[i] No fue necesario desbloquear el script (ya está permitido)."
+    }
+}
+# --- FIN AUTO-EJECUCIÓN SEGURA ---
 
 param(
   [switch]$Test
