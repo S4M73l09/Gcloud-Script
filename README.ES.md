@@ -23,6 +23,7 @@ Todo a traves de un Script interactivo — No requiere pasos avanzados.
 📦 Gcloud-Scripts  
 ├── setup_vm.sh  # Script de Automatizacion bash  
 ├── setup_vm.ps1 # Script de Automatizacion Powershell  
+├── setup_vm.cmd # Wrapper para script .ps1   
 ├── README.md  
 ├── README.ES.md # Estas aqui  
 └── terraform/ # Archivos de terraform generados  
@@ -56,6 +57,11 @@ cd Gcloud-Scripts
 ./setup_vm.ps1 -test #Para ejecutar el tipo Test
 ./setup_vm.ps1 #Ejecucion normal
 ```  
+CMD:  
+Este repositorio esta preparado para lanzar el script en windows usando CMD directamente desde su propio Wrapper, solo tienes que ejecutarlo y el Wrapper se encargara de todo lo que haga el script .ps1.  
+
+***setup_vm.cmd***
+***setup_vm.cmd -test*** *Para ejecutar el modo test*
 
 El Script comenzara a:
 

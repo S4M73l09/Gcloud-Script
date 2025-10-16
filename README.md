@@ -21,7 +21,8 @@ All through a single interactive script — no advanced GCP knowledge required.
 ## 📁 Repository structure  
 📦 Gcloud-Scripts  
 ├── setup_vm.sh  #Main automation script bash  
-├── setup_vm.ps1 #Main automation script powershell 
+├── setup_vm.ps1 #Main automation script powershell  
+├── setup_vm.cmd #Wrapper for script .ps1  
 ├── README.md # You are here  
 ├── README.ES.md  
 └── terraform/ # Generated Terraform files  
@@ -30,7 +31,7 @@ All through a single interactive script — no advanced GCP knowledge required.
 ├── variables.tf  
 ├── outputs.tf  
 └── terraform.tfvar  
-└── Readme.md
+└── Readme.md  
 
 ---
 
@@ -57,6 +58,11 @@ cd Gcloud-Scripts
 ./setup_vm.ps1 -test #to execute the test type  
 ./setup_vm.ps1 #Normal execution  
 ```
+CMD:  
+This repository is prepared so that you can run the script in Windows using CMD directly using a wrapper, you just have to run it and the wrapper will be in charge of launching the .ps1 script.
+
+***setup_vm.cmd***  
+***setup_vm.cmd -test***  *to execute the test type*  
 
 The script will:
 
