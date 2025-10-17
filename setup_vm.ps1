@@ -11,6 +11,14 @@
   - Usa -Test para generar ficheros sin tocar GCP
 #>
 
+param(
+  [switch]$Test
+)
+
+# --- Seguridad y comportamiento ---
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
 # Fuerza Python embebido y el launcher .cmd de gcloud
 $env:CLOUDSDK_PYTHON = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk\platform\bundledpython\python.exe'
 $GcloudCmd = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd'
@@ -18,10 +26,6 @@ if (-not (Test-Path $GcloudCmd)) { throw "gcloud.cmd no encontrado: $GcloudCmd" 
 
 # Alias para que cualquier 'gcloud ...' use SIEMPRE el .cmd (y no gcloud.ps1)
 Set-Alias -Name gcloud -Value $GcloudCmd -Scope Process -Force
-
-param(
-  [switch]$Test
-)
 
 # ---------- Seguridad y utilidades ----------
 Set-StrictMode -Version 2.0
