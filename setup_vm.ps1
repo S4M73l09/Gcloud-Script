@@ -24,8 +24,17 @@ $env:CLOUDSDK_PYTHON = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-clou
 $GcloudCmd = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd'
 if (-not (Test-Path $GcloudCmd)) { throw "gcloud.cmd no encontrado: $GcloudCmd" }
 
-# Alias para que cualquier 'gcloud ...' use SIEMPRE el .cmd (y no gcloud.ps1)
-Set-Alias -Name gcloud -Value $GcloudCmd -Scope Process -Force
+# Función gcloud: siempre ejecuta el .cmd (evita gcloud.ps1)
+function gcloud { & $GcloudCmd @args }
+
+#Funcion opcional para control a prueba de errores
+function Invoke-GCloud {
+  param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+  & $GcloudCmd @Args
+  if ($LASTEXITCODE -ne 0) {
+    throw "gcloud falló ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
+  }
+}
 
 # ---------- Seguridad y utilidades ----------
 Set-StrictMode -Version 2.0
