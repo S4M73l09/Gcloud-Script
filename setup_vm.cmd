@@ -14,6 +14,13 @@ set "PATH=%LOCALAPPDATA%\Google\Cloud SDK\google-cloud-sdk\bin;%PATH%"
 rem --- Fuerza el Python embebido del SDK (evita errores (unset)) ---
 set "CLOUDSDK_PYTHON=%LOCALAPPDATA%\Google\Cloud SDK\google-cloud-sdk\platform\bundledpython\python.exe"
 
+if not exist "%LOCALAPPDATA%\Google\Cloud SDK\google-cloud-sdk\platform\bundledpython\python.exe" (
+  echo [ADVERTENCIA] No se encontro el Python embebido del SDK. 
+  echo Continuo igualmente...
+  echo.
+)
+
+
 rem --- Comprobación: ¿existe gcloud.cmd? ---
 if not exist "%LOCALAPPDATA%\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" (
     echo [ERROR] Google Cloud SDK no está instalado o la ruta no existe.
@@ -32,23 +39,26 @@ if not exist "%PS_SCRIPT%" (
 
 rem --- Mensaje informativo ---
 echo ==============================================
-echo  Ejecutando script PowerShell: setup_vm.ps1
+echo  Ejecutando script PowerShell: %PS_SCRIPT%
 echo  Directorio actual: %CD%
 echo  Argumentos: %*
 echo ==============================================
 echo.
 
-rem --- Ejecuta el script PowerShell con los argumentos del usuario ---
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
-
-if %errorlevel% neq 0 (
+rem --- Ejecuta el script PowerShell con control robusto de errores ---
+call :runps
+set ERR=%ERRORLEVEL%
+if not "%ERR%"=="0" (
     echo.
-    echo [ERROR] El script PowerShell terminó con errores (código %errorlevel%).
+    echo [ERROR] El script PowerShell terminó con errores (código %ERR%).
     pause
-    exit /b %errorlevel%
+    exit /b %ERR%
 )
-
 echo.
 echo [OK] Script completado correctamente.
 pause
-endlocal
+exit /b 0
+
+:runps
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
+exit /b %ERRORLEVEL%
