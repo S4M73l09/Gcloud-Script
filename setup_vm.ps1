@@ -1,12 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Automatiza backend GCS, Service Account (impersonación) y Terraform (VPC, subnet, firewall, VM).
+  Automatiza backend GCS, Service Account (impersonaciÃ³n) y Terraform (VPC, subnet, firewall, VM).
 
 .DESCRIPTION
   - Crea bucket GCS para estado (UBA + versioning + lifecycle)
-  - Crea Service Account y concede permisos mínimos + impersonación para tu usuario
-  - Genera configuración Terraform (VPC/Subred/Firewall + VM Linux/Windows)
+  - Crea Service Account y concede permisos mÃ­nimos + impersonaciÃ³n para tu usuario
+  - Genera configuraciÃ³n Terraform (VPC/Subred/Firewall + VM Linux/Windows)
   - Ejecuta terraform init/plan y, si confirmas, apply
   - Usa -Test para generar ficheros sin tocar GCP
 #>
@@ -19,6 +19,8 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+if ($PSVersionTable.PSEdition -eq 'Core') { $PSNativeCommandUseErrorActionPreference = $true }
+
 # Fuerza Python embebido y el launcher .cmd de gcloud
 
 $GcloudRoot = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk'
@@ -29,9 +31,9 @@ if (-not (Test-Path $GcloudCmd)) {
     throw "gcloud.cmd no encontrado: $GcloudCmd"
 }
 if (-not (Test-Path $env:CLOUDSDK_PYTHON)) {
-    Write-Warning "No se encontró el Python embebido del SDK. Continuando igualmente..."
+    Write-Warning "No se encontrÃ³ el Python embebido del SDK. Continuando igualmente..."
 }
-# --- Función gcloud: siempre ejecuta el .cmd (evita gcloud.ps1) ---
+# --- FunciÃ³n gcloud: siempre ejecuta el .cmd (evita gcloud.ps1) ---
 function gcloud {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
@@ -39,20 +41,20 @@ function gcloud {
     )
     & $GcloudCmd @Args
     if ($LASTEXITCODE -ne 0) {
-        throw "gcloud falló ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
+        throw "gcloud fallÃ³ ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
     }
 }
 
-# --- Función alternativa (si prefieres más control) ---
+# --- FunciÃ³n alternativa (si prefieres mÃ¡s control) ---
 function Invoke-GCloud {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
         [string[]]$Args
     )
-    Write-Host "→ Ejecutando: gcloud $($Args -join ' ')" -ForegroundColor Cyan
+    Write-Host "â†’ Ejecutando: gcloud $($Args -join ' ')" -ForegroundColor Cyan
     & $GcloudCmd @Args
     if ($LASTEXITCODE -ne 0) {
-        throw "gcloud falló ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
+        throw "gcloud fallÃ³ ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
     }
 }
 
@@ -72,10 +74,10 @@ function Prompt-Input([string]$Message, [string]$Default = "") {
     switch -Wildcard ($Message) {
       "*correo*"   { return "tester@example.com" }
       "*proyecto*" { return "test-project-123" }
-      "*Región*"   { return "europe-southwest1" }
+      "*RegiÃ³n*"   { return "europe-southwest1" }
       "*Zona*"     { return "europe-southwest1-a" }
       "*Prefijo*"  { return "lab" }
-      "*máquina*"  { return "e2-medium" }
+      "*mÃ¡quina*"  { return "e2-medium" }
       "*disco*"    { return "50" }
       default      { return $Default }
     }
@@ -105,13 +107,13 @@ Need terraform
 # ---------- Inputs ----------
 $email   = Prompt-Input "Introduce tu correo de Google (para gcloud):"
 $defProj = (gcloud config get-value project 2>$null)
-$project = Prompt-Input "ID del proyecto GCP (o vacío para el activo):" $defProj
+$project = Prompt-Input "ID del proyecto GCP (o vacÃ­o para el activo):" $defProj
 if (-not $project) { $project = Prompt-Input "ID de proyecto GCP:" "test-project-123" }
-$region  = Prompt-Input "Región (p.ej. europe-southwest1):" "europe-southwest1"
+$region  = Prompt-Input "RegiÃ³n (p.ej. europe-southwest1):" "europe-southwest1"
 $zone    = Prompt-Input "Zona (p.ej. ${region}-a):" "$($region)-a"
 $prefix  = Prompt-Input "Prefijo para los recursos:" "lab"
-$machine = Prompt-Input "Tipo de máquina (e2-medium recomendado):" "e2-medium"
-[int]$diskGB = [int](Prompt-Input "Tamaño del disco (GB):" "50")
+$machine = Prompt-Input "Tipo de mÃ¡quina (e2-medium recomendado):" "e2-medium"
+[int]$diskGB = [int](Prompt-Input "TamaÃ±o del disco (GB):" "50")
 
 # SO
 $osOptions = @(
@@ -126,11 +128,11 @@ if ($Test) {
   Write-Host ""
   Write-Host "Elige sistema operativo:" -ForegroundColor Cyan
   for ($i=0; $i -lt $osOptions.Count; $i++) { Write-Host ("[{0}] {1}" -f ($i+1), $osOptions[$i]) }
-  do { $idx = [int](Read-Host ("Número (1-{0})" -f $osOptions.Count)) } while ($idx -lt 1 -or $idx -gt $osOptions.Count)
+  do { $idx = [int](Read-Host ("NÃºmero (1-{0})" -f $osOptions.Count)) } while ($idx -lt 1 -or $idx -gt $osOptions.Count)
   $osChoice = $osOptions[$idx-1]
 }
 
-# Imagen y ajustes según SO
+# Imagen y ajustes segÃºn SO
 $osType = "linux"
 $image  = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
 switch ($osChoice) {
@@ -157,7 +159,7 @@ $baseDir = if ($Test) { $TerraformDir.FullName } else { Join-Path (Split-Path -P
 Write-Host ""
 Write-Host "Resumen:" -ForegroundColor Yellow
 Write-Host ("  Proyecto: {0}" -f $project)
-Write-Host ("  Región:   {0}" -f $region)
+Write-Host ("  RegiÃ³n:   {0}" -f $region)
 Write-Host ("  Zona:     {0}" -f $zone)
 Write-Host ("  SO:       {0} (tipo: {1})" -f $osChoice, $osType)
 Write-Host ("  Imagen:   {0}" -f $image)
@@ -165,12 +167,12 @@ Write-Host ("  SA:       {0}" -f $saEmail)
 Write-Host ("  Bucket:   gs://{0}" -f $bucket)
 Write-Host ""
 
-# ---------- Preparación GCP (si no es Test) ----------
+# ---------- PreparaciÃ³n GCP (si no es Test) ----------
 if (-not $Test) {
-  # Sesión y proyecto
+  # SesiÃ³n y proyecto
   $accounts = (gcloud auth list --format="value(account)") -split "`n"
   if (-not ($accounts -contains $email)) {
-    Write-Host ("[i] Iniciando sesión para {0} ..." -f $email)
+    Write-Host ("[i] Iniciando sesiÃ³n para {0} ..." -f $email)
     gcloud auth login $email | Out-Null
   }
   gcloud config set account $email   | Out-Null
@@ -223,14 +225,14 @@ if (-not $Test) {
     --member=("serviceAccount:{0}" -f $saEmail) `
     --role="roles/storage.objectAdmin" | Out-Null
 
-  # Impersonación: tu usuario -> SA
-  Write-Host "[i] Concediendo impersonación a tu usuario sobre la SA..."
+  # ImpersonaciÃ³n: tu usuario -> SA
+  Write-Host "[i] Concediendo impersonaciÃ³n a tu usuario sobre la SA..."
   gcloud iam service-accounts add-iam-policy-binding $saEmail `
     --member=("user:{0}" -f $email) `
     --role="roles/iam.serviceAccountTokenCreator" | Out-Null
 }
 
-# ---------- Generación de archivos Terraform ----------
+# ---------- GeneraciÃ³n de archivos Terraform ----------
 New-Item -ItemType Directory -Force -Path $baseDir | Out-Null
 
 # backend.hcl
@@ -370,7 +372,7 @@ terraform -chdir="$baseDir" init -reconfigure -backend-config="backend.hcl"
 Write-Host "Planificando..." -ForegroundColor Cyan
 terraform -chdir="$baseDir" plan
 
-if (Confirm-Action "¿Aplicar ahora (crear VPC+Subnet+Firewall+VM)?") {
+if (Confirm-Action "Â¿Aplicar ahora (crear VPC+Subnet+Firewall+VM)?") {
   terraform -chdir="$baseDir" apply -auto-approve
   try { $ip = terraform -chdir="$baseDir" output -raw vm_ip } catch { $ip = "" }
 
@@ -378,7 +380,7 @@ if (Confirm-Action "¿Aplicar ahora (crear VPC+Subnet+Firewall+VM)?") {
     Write-Host ""
     Write-Host "[i] Credenciales Windows:" -ForegroundColor Yellow
     Write-Host ("    gcloud compute reset-windows-password {0}-vm --zone {1} --user admin" -f $prefix, $zone)
-    if ($ip) { Write-Host ("    Conéctate por RDP a: {0}:3389" -f $ip) }
+    if ($ip) { Write-Host ("    ConÃ©ctate por RDP a: {0}:3389" -f $ip) }
   } else {
     if ($ip) {
       Write-Host ""
@@ -388,6 +390,3 @@ if (Confirm-Action "¿Aplicar ahora (crear VPC+Subnet+Firewall+VM)?") {
 } else {
   Write-Host "OK. No se aplicaron cambios." -ForegroundColor Yellow
 }
-
-
-
