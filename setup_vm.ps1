@@ -20,21 +20,42 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 # Fuerza Python embebido y el launcher .cmd de gcloud
-$env:CLOUDSDK_PYTHON = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk\platform\bundledpython\python.exe'
-$GcloudCmd = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd'
-if (-not (Test-Path $GcloudCmd)) { throw "gcloud.cmd no encontrado: $GcloudCmd" }
 
-# Función gcloud: siempre ejecuta el .cmd (evita gcloud.ps1)
-function gcloud { & $GcloudCmd @args }
+$GcloudRoot = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk'
+$env:CLOUDSDK_PYTHON = Join-Path $GcloudRoot 'platform\bundledpython\python.exe'
+$GcloudCmd = Join-Path $GcloudRoot 'bin\gcloud.cmd'
 
-#Funcion opcional para control a prueba de errores
-function Invoke-GCloud {
-  param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
-  & $GcloudCmd @Args
-  if ($LASTEXITCODE -ne 0) {
-    throw "gcloud falló ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
-  }
+if (-not (Test-Path $GcloudCmd)) {
+    throw "gcloud.cmd no encontrado: $GcloudCmd"
 }
+if (-not (Test-Path $env:CLOUDSDK_PYTHON)) {
+    Write-Warning "No se encontró el Python embebido del SDK. Continuando igualmente..."
+}
+# --- Función gcloud: siempre ejecuta el .cmd (evita gcloud.ps1) ---
+function gcloud {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+    & $GcloudCmd @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "gcloud falló ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
+    }
+}
+
+# --- Función alternativa (si prefieres más control) ---
+function Invoke-GCloud {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+    Write-Host "→ Ejecutando: gcloud $($Args -join ' ')" -ForegroundColor Cyan
+    & $GcloudCmd @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "gcloud falló ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
+    }
+}
+
 
 # ---------- Seguridad y utilidades ----------
 Set-StrictMode -Version 2.0
