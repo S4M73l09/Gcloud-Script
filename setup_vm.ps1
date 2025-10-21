@@ -1,392 +1,402 @@
 #Requires -Version 5.1
 <#
-.SYNOPSIS
-  Automatiza backend GCS, Service Account (impersonaciÃ³n) y Terraform (VPC, subnet, firewall, VM).
-
-.DESCRIPTION
-  - Crea bucket GCS para estado (UBA + versioning + lifecycle)
-  - Crea Service Account y concede permisos mÃ­nimos + impersonaciÃ³n para tu usuario
-  - Genera configuraciÃ³n Terraform (VPC/Subred/Firewall + VM Linux/Windows)
-  - Ejecuta terraform init/plan y, si confirmas, apply
-  - Usa -Test para generar ficheros sin tocar GCP
+  setup_vm.ps1 — Refactor limpio (con prefijo de archivos según sistema operativo)
+  ---------------------------------------------------------------
+  - Si se usa -Test → crea los ficheros Terraform en una carpeta temporal (%TEMP%) y la elimina al finalizar.
+  - Si se ejecuta en modo real → guarda los ficheros en ./terraform.
+  - Carpetas separadas dentro ./terraform según SO (Linux-<sufijo> o PW-windows-<sufijo>).
+  - El wrapper se encarga del PATH y autenticación.
 #>
 
+[CmdletBinding(SupportsShouldProcess = $true, PositionalBinding = $false, ConfirmImpact = 'Medium')]
 param(
+  [Parameter(Mandatory)][string]$ProjectId,
+  [Parameter(Mandatory)][string]$Region,
+  [Parameter(Mandatory)][string]$Zone,
+  [string]$StateBucketName = "tfstate-$([guid]::NewGuid().ToString('N').Substring(0,8))",
+  [string]$StatePrefix = 'env/default',
+  [ValidateSet('linux','windows')][string]$OsType = 'linux',
+  [string]$Prefix = 'demo',
+  [string]$MachineType = 'e2-medium',
+  [string]$ImageFamily = 'debian-12',
+  [string]$ImageProject = 'debian-cloud',
+  [int]$OsDiskGb,
+  [string]$VpcCidr = '10.10.0.0/16',
+  [string]$SubnetCidr = '10.10.10.0/24',
+  [string[]]$OpenTcp = @('22','80','443','3389'),
+  [string]$SaName = 'tf-runner',
+  [string]$SaDisplay = 'Terraform Runner',
+  [string]$EnvNameSuffix,
+  [switch]$AutoApprove,
+  [int]$TfParallelism = 10,
   [switch]$Test
 )
 
-# --- Seguridad y comportamiento ---
-Set-StrictMode -Version 2.0
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-if ($PSVersionTable.PSEdition -eq 'Core') { $PSNativeCommandUseErrorActionPreference = $true }
-
-# Fuerza Python embebido y el launcher .cmd de gcloud
-
-$GcloudRoot = Join-Path $env:LOCALAPPDATA 'Google\Cloud SDK\google-cloud-sdk'
-$env:CLOUDSDK_PYTHON = Join-Path $GcloudRoot 'platform\bundledpython\python.exe'
-$GcloudCmd = Join-Path $GcloudRoot 'bin\gcloud.cmd'
-
-if (-not (Test-Path $GcloudCmd)) {
-    throw "gcloud.cmd no encontrado: $GcloudCmd"
-}
-if (-not (Test-Path $env:CLOUDSDK_PYTHON)) {
-    Write-Warning "No se encontrÃ³ el Python embebido del SDK. Continuando igualmente..."
-}
-# --- FunciÃ³n gcloud: siempre ejecuta el .cmd (evita gcloud.ps1) ---
-function gcloud {
-    param(
-        [Parameter(ValueFromRemainingArguments = $true)]
-        [string[]]$Args
-    )
-    & $GcloudCmd @Args
-    if ($LASTEXITCODE -ne 0) {
-        throw "gcloud fallÃ³ ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
-    }
+function Write-Log { param([ValidateSet('INFO','WARN','ERROR','DEBUG')][string]$Level, [string]$Message)
+  $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+  $line = "[$ts][$Level] $Message"
+  if ($Level -eq 'ERROR') { Write-Error $Message -ErrorAction Continue } else { Write-Host $line }
 }
 
-# --- FunciÃ³n alternativa (si prefieres mÃ¡s control) ---
-function Invoke-GCloud {
-    param(
-        [Parameter(ValueFromRemainingArguments = $true)]
-        [string[]]$Args
-    )
-    Write-Host "â†’ Ejecutando: gcloud $($Args -join ' ')" -ForegroundColor Cyan
-    & $GcloudCmd @Args
-    if ($LASTEXITCODE -ne 0) {
-        throw "gcloud fallÃ³ ($LASTEXITCODE). Comando: gcloud $($Args -join ' ')"
-    }
+$script:Gcloud = $env:GCLOUD_CLI ?? 'gcloud'
+$script:Terraform = $env:TERRAFORM_CLI ?? 'terraform'
+
+function Invoke-Gcloud { param([string[]]$Args, [switch]$Json)
+  Write-Log DEBUG ("gcloud " + ($Args -join ' '))
+  if ($Json) { (& $script:Gcloud @Args --format=json) | ConvertFrom-Json } else { & $script:Gcloud @Args }
+  if ($LASTEXITCODE -ne 0) { throw "gcloud error ($LASTEXITCODE)" }
+}
+function Invoke-Terraform { param([string[]]$Args)
+  Write-Log DEBUG ("terraform " + ($Args -join ' '))
+  & $script:Terraform @Args
+  if ($LASTEXITCODE -ne 0) { throw "terraform error ($LASTEXITCODE)" }
 }
 
-
-# ---------- Seguridad y utilidades ----------
-Set-StrictMode -Version 2.0
-$ErrorActionPreference = "Stop"
-
-function Need([string]$cmd) {
-  if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-    throw "No encontrado en PATH: '$cmd'"
-  }
+# --- Utilidades interacción (solo si faltan parámetros) ---
+function Ask($prompt, $default='') {
+  $v = Read-Host -Prompt $prompt
+  if ([string]::IsNullOrWhiteSpace($v)) { return $default } else { return $v }
 }
-
-function Prompt-Input([string]$Message, [string]$Default = "") {
-  if ($Test) {
-    switch -Wildcard ($Message) {
-      "*correo*"   { return "tester@example.com" }
-      "*proyecto*" { return "test-project-123" }
-      "*RegiÃ³n*"   { return "europe-southwest1" }
-      "*Zona*"     { return "europe-southwest1-a" }
-      "*Prefijo*"  { return "lab" }
-      "*mÃ¡quina*"  { return "e2-medium" }
-      "*disco*"    { return "50" }
-      default      { return $Default }
-    }
-  } else {
-    if ($Default) { return Read-Host "$Message [$Default]" } else { return Read-Host $Message }
-  }
-}
-
-function Confirm-Action([string]$Message) {
-  if ($Test) { return $true }
-  $ans = Read-Host "$Message (y/N)"
-  return $ans -match '^[Yy]'
-}
-
-function New-RandHex([int]$bytes = 2) { -join ((1..$bytes) | ForEach-Object { "{0:x2}" -f (Get-Random -Min 0 -Max 256) }) }
-
-function Write-TextUtf8($Path, [string[]]$Lines) {
-  $nl = "`r`n"
-  ($Lines -join $nl) | Set-Content -Path $Path -Encoding utf8
-}
-
-# ---------- Dependencias ----------
-Need gcloud
-Need gsutil
-Need terraform
-
-# ---------- Inputs ----------
-$email   = Prompt-Input "Introduce tu correo de Google (para gcloud):"
-$defProj = (gcloud config get-value project 2>$null)
-$project = Prompt-Input "ID del proyecto GCP (o vacÃ­o para el activo):" $defProj
-if (-not $project) { $project = Prompt-Input "ID de proyecto GCP:" "test-project-123" }
-$region  = Prompt-Input "RegiÃ³n (p.ej. europe-southwest1):" "europe-southwest1"
-$zone    = Prompt-Input "Zona (p.ej. ${region}-a):" "$($region)-a"
-$prefix  = Prompt-Input "Prefijo para los recursos:" "lab"
-$machine = Prompt-Input "Tipo de mÃ¡quina (e2-medium recomendado):" "e2-medium"
-[int]$diskGB = [int](Prompt-Input "TamaÃ±o del disco (GB):" "50")
-
-# SO
-$osOptions = @(
-  "Ubuntu 22.04 LTS",
-  "Debian 12",
-  "Windows Server 2022",
-  "Windows Server 2019"
-)
-if ($Test) {
-  $osChoice = "Debian 12"
-} else {
-  Write-Host ""
-  Write-Host "Elige sistema operativo:" -ForegroundColor Cyan
-  for ($i=0; $i -lt $osOptions.Count; $i++) { Write-Host ("[{0}] {1}" -f ($i+1), $osOptions[$i]) }
-  do { $idx = [int](Read-Host ("NÃºmero (1-{0})" -f $osOptions.Count)) } while ($idx -lt 1 -or $idx -gt $osOptions.Count)
-  $osChoice = $osOptions[$idx-1]
-}
-
-# Imagen y ajustes segÃºn SO
-$osType = "linux"
-$image  = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
-switch ($osChoice) {
-  "Ubuntu 22.04 LTS"    { $osType="linux";   $image="projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts" }
-  "Debian 12"           { $osType="linux";   $image="projects/debian-cloud/global/images/family/debian-12" }
-  "Windows Server 2022" { $osType="windows"; $image="projects/windows-cloud/global/images/family/windows-2022"; if ($diskGB -lt 64) { $diskGB=64 } }
-  "Windows Server 2019" { $osType="windows"; $image="projects/windows-cloud/global/images/family/windows-2019"; if ($diskGB -lt 64) { $diskGB=64 } }
-}
-
-# Identificadores y paths
-$rand     = New-RandHex 2
-$bucket   = ("tf-state-{0}-{1}" -f $project, $rand).ToLower()
-$saName   = "$prefix-tf-sa"
-$saEmail  = "$saName@$project.iam.gserviceaccount.com"
-
-# Carpeta Terraform
-if ($Test) {
-  $TempRoot    = Join-Path $env:TEMP ("gcp-test-" + (New-RandHex 4))
-  New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
-  $TerraformDir = New-Item -ItemType Directory -Force -Path (Join-Path $TempRoot "terraform")
-}
-$baseDir = if ($Test) { $TerraformDir.FullName } else { Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Definition) "terraform" }
-
-Write-Host ""
-Write-Host "Resumen:" -ForegroundColor Yellow
-Write-Host ("  Proyecto: {0}" -f $project)
-Write-Host ("  RegiÃ³n:   {0}" -f $region)
-Write-Host ("  Zona:     {0}" -f $zone)
-Write-Host ("  SO:       {0} (tipo: {1})" -f $osChoice, $osType)
-Write-Host ("  Imagen:   {0}" -f $image)
-Write-Host ("  SA:       {0}" -f $saEmail)
-Write-Host ("  Bucket:   gs://{0}" -f $bucket)
-Write-Host ""
-
-# ---------- PreparaciÃ³n GCP (si no es Test) ----------
-if (-not $Test) {
-  # SesiÃ³n y proyecto
-  $accounts = (gcloud auth list --format="value(account)") -split "`n"
-  if (-not ($accounts -contains $email)) {
-    Write-Host ("[i] Iniciando sesiÃ³n para {0} ..." -f $email)
-    gcloud auth login $email | Out-Null
-  }
-  gcloud config set account $email   | Out-Null
-  gcloud config set project $project | Out-Null
-
-  # ADC para Terraform (si falta)
-  $adc1 = Join-Path $env:APPDATA "gcloud\application_default_credentials.json"
-  $adc2 = Join-Path $HOME ".config\gcloud\application_default_credentials.json"
-  if (-not (Test-Path $adc1) -and -not (Test-Path $adc2)) {
-    Write-Host "[i] Creando Application Default Credentials (ADC) ..."
-    gcloud auth application-default login | Out-Null
-  }
-
-  # APIs
-  Write-Host "[i] Habilitando APIs (puede tardar)..."
-  gcloud services enable `
-    compute.googleapis.com `
-    iam.googleapis.com `
-    cloudresourcemanager.googleapis.com `
-    storage.googleapis.com `
-    | Out-Null
-
-  # Bucket backend (UBA + versioning + lifecycle)
-  Write-Host ("[i] Creando bucket: gs://{0}" -f $bucket)
-  gcloud storage buckets create ("gs://{0}" -f $bucket) --location=$region --uniform-bucket-level-access | Out-Null
-  gcloud storage buckets update ("gs://{0}" -f $bucket) --versioning | Out-Null
-
-  $tmpLifecycle = Join-Path $env:TEMP ("lifecycle-" + (New-RandHex 2) + ".json")
-  $lcLines = @(
-    '{'
-    '  "rule": ['
-    '    {'
-    '      "action": { "type": "Delete" },'
-    '      "condition": { "isLive": false, "age": 60 }'
-    '    }'
-    '  ]'
-    '}'
+function Select-Os {
+  Write-Host "`nElige sistema operativo:" -ForegroundColor Cyan
+  $opts = @(
+    @{name='Ubuntu 22.04 LTS'; type='linux';   family='ubuntu-2204-lts'; project='ubuntu-os-cloud'; minDisk=10},
+    @{name='Debian 12';        type='linux';   family='debian-12';       project='debian-cloud';   minDisk=10},
+    @{name='Windows Server 2022'; type='windows'; family='windows-2022'; project='windows-cloud';  minDisk=64},
+    @{name='Windows Server 2019'; type='windows'; family='windows-2019'; project='windows-cloud';  minDisk=64}
   )
-  Write-TextUtf8 $tmpLifecycle $lcLines
-  gcloud storage buckets update ("gs://{0}" -f $bucket) --lifecycle-file=$tmpLifecycle | Out-Null
-  Remove-Item $tmpLifecycle -Force -ErrorAction SilentlyContinue
-
-  # Service Account
-  Write-Host ("[i] Creando Service Account {0} ..." -f $saEmail)
-  gcloud iam service-accounts create $saName --display-name "Terraform Service Account" | Out-Null
-
-  # Permiso bucket para SA
-  Write-Host "[i] Concediendo acceso al bucket a la SA..."
-  gcloud storage buckets add-iam-policy-binding ("gs://{0}" -f $bucket) `
-    --member=("serviceAccount:{0}" -f $saEmail) `
-    --role="roles/storage.objectAdmin" | Out-Null
-
-  # ImpersonaciÃ³n: tu usuario -> SA
-  Write-Host "[i] Concediendo impersonaciÃ³n a tu usuario sobre la SA..."
-  gcloud iam service-accounts add-iam-policy-binding $saEmail `
-    --member=("user:{0}" -f $email) `
-    --role="roles/iam.serviceAccountTokenCreator" | Out-Null
+  for ($i=0; $i -lt $opts.Count; $i++) { Write-Host ("  [$($i+1)] $($opts[$i].name)") }
+  $k = Ask 'Selección (1-4)' '1'
+  if (-not ($k -as [int]) -or [int]$k -lt 1 -or [int]$k -gt $opts.Count) { throw 'Selección de SO inválida' }
+  return $opts[[int]$k - 1]
+}
+function Select-MachineType {
+  Write-Host "`nElige tipo de máquina (o 'C' para personalizado):" -ForegroundColor Cyan
+  $types = @('e2-micro','e2-small','e2-medium','e2-standard-2','n2-standard-2','n2d-standard-2','t2d-standard-2','c3-standard-4')
+  for ($i=0; $i -lt $types.Count; $i++) { Write-Host ("  [$($i+1)] $($types[$i])") }
+  $sel = Ask 'Selección (1-8/C)' '3'
+  if ($sel -match '^[Cc]$') { return Ask 'Introduce el tipo (p.ej. e2-standard-4)' 'e2-medium' }
+  if (-not ($sel -as [int]) -or [int]$sel -lt 1 -or [int]$sel -gt $types.Count) { throw 'Selección de tipo inválida' }
+  return $types[[int]$sel - 1]
 }
 
-# ---------- GeneraciÃ³n de archivos Terraform ----------
-New-Item -ItemType Directory -Force -Path $baseDir | Out-Null
-
-# backend.hcl
-Write-TextUtf8 (Join-Path $baseDir "backend.hcl") @(
-  ('bucket  = "{0}"' -f $bucket)
-  'prefix  = "global/state"'
-  ('impersonate_service_account = "{0}"' -f $saEmail)
-)
-
-# main.tf
-Write-TextUtf8 (Join-Path $baseDir "main.tf") @(
-  'terraform {'
-  '  required_version = ">= 1.5.0"'
-  '  backend "gcs" {}'
-  '  required_providers {'
-  '    google = { source = "hashicorp/google", version = "~> 5.43" }'
-  '    random = { source = "hashicorp/random", version = "~> 3.6" }'
-  '  }'
-  '}'
-  ''
-  'provider "google" {'
-  '  project                     = var.project_id'
-  '  region                      = var.region'
-  '  impersonate_service_account = var.impersonate_sa'
-  '}'
-  ''
-  'resource "random_id" "suffix" {'
-  '  byte_length = 2'
-  '}'
-  ''
-  'resource "google_compute_network" "vpc" {'
-  '  name                    = "${var.name_prefix}-vpc-${random_id.suffix.hex}"'
-  '  auto_create_subnetworks = false'
-  '}'
-  ''
-  'resource "google_compute_subnetwork" "subnet" {'
-  '  name          = "${var.name_prefix}-subnet"'
-  '  ip_cidr_range = var.subnet_cidr'
-  '  region        = var.region'
-  '  network       = google_compute_network.vpc.id'
-  '}'
-  ''
-  'resource "google_compute_firewall" "allow_ssh" {'
-  '  count    = var.os_type == "linux" ? 1 : 0'
-  '  name     = "${var.name_prefix}-allow-ssh"'
-  '  network  = google_compute_network.vpc.name'
-  '  priority = 1000'
-  '  allow { protocol = "tcp" ports = ["22"] }'
-  '  source_ranges = var.ssh_cidr_allow'
-  '  target_tags   = ["ssh"]'
-  '}'
-  ''
-  'resource "google_compute_firewall" "allow_rdp" {'
-  '  count    = var.os_type == "windows" ? 1 : 0'
-  '  name     = "${var.name_prefix}-allow-rdp"'
-  '  network  = google_compute_network.vpc.name'
-  '  priority = 1000'
-  '  allow { protocol = "tcp" ports = ["3389"] }'
-  '  source_ranges = var.rdp_cidr_allow'
-  '  target_tags   = ["rdp"]'
-  '}'
-  ''
-  'resource "google_compute_instance" "vm" {'
-  '  name         = "${var.name_prefix}-vm"'
-  '  machine_type = var.machine_type'
-  '  zone         = var.zone'
-  ''
-  '  boot_disk {'
-  '    initialize_params {'
-  '      image = var.image'
-  '      size  = var.disk_gb'
-  '    }'
-  '  }'
-  ''
-  '  network_interface {'
-  '    subnetwork = google_compute_subnetwork.subnet.id'
-  '    access_config {}'
-  '  }'
-  ''
-  '  metadata = var.os_type == "linux" ? { enable-oslogin = "TRUE" } : {}'
-  ''
-  '  tags = var.os_type == "linux" ? ["ssh"] : ["rdp"]'
-  '}'
-  ''
-  'output "vm_ip" {'
-  '  value = google_compute_instance.vm.network_interface[0].access_config[0].nat_ip'
-  '}'
-)
-
-# variables.tf
-Write-TextUtf8 (Join-Path $baseDir "variables.tf") @(
-  'variable "project_id"      { type = string }'
-  'variable "region"          { type = string }'
-  'variable "zone"            { type = string }'
-  'variable "impersonate_sa"  { type = string }'
-  'variable "name_prefix"     { type = string  default = "lab" }'
-  'variable "subnet_cidr"     { type = string  default = "10.10.0.0/24" }'
-  'variable "os_type"         { type = string  description = "linux | windows" }'
-  'variable "image"           { type = string  description = "GCE image or family URL" }'
-  'variable "ssh_cidr_allow"  { type = list(string) default = ["0.0.0.0/0"] }'
-  'variable "rdp_cidr_allow"  { type = list(string) default = ["0.0.0.0/0"] }'
-  'variable "machine_type"    { type = string  default = "e2-medium" }'
-  'variable "disk_gb"         { type = number  default = 50 }'
-)
-
-# outputs.tf
-Write-TextUtf8 (Join-Path $baseDir "outputs.tf") @(
-  'output "vm_ip" { value = google_compute_instance.vm.network_interface[0].access_config[0].nat_ip }'
-)
-
-# terraform.tfvars
-Write-TextUtf8 (Join-Path $baseDir "terraform.tfvars") @(
-  ('project_id     = "{0}"' -f $project)
-  ('region         = "{0}"' -f $region)
-  ('zone           = "{0}"' -f $zone)
-  ('impersonate_sa = "{0}"' -f $saEmail)
-  ''
-  ('name_prefix    = "{0}"' -f $prefix)
-  ('machine_type   = "{0}"' -f $machine)
-  ('disk_gb        = {0}' -f $diskGB)
-  ('os_type        = "{0}"' -f $osType)
-  ('image          = "{0}"' -f $image)
-  ''
-  'ssh_cidr_allow = ["0.0.0.0/0"]'
-  'rdp_cidr_allow = ["0.0.0.0/0"]'
-)
-
-# ---------- Terraform (init/plan/apply) ----------
-if ($Test) {
-  Write-Host "[TEST] Generados ficheros en: $baseDir" -ForegroundColor Green
-  return
+function Ensure-ProjectContext {
+  Invoke-Gcloud -Args @('config','set','project',$ProjectId) | Out-Null
+  Invoke-Gcloud -Args @('config','set','compute/region',$Region) | Out-Null
+  Invoke-Gcloud -Args @('config','set','compute/zone',$Zone) | Out-Null
 }
 
-Write-Host "Inicializando Terraform..." -ForegroundColor Cyan
-terraform -chdir="$baseDir" init -reconfigure -backend-config="backend.hcl"
+function Enable-RequiredApis {
+  $apis = @('compute.googleapis.com','iam.googleapis.com','cloudresourcemanager.googleapis.com','oslogin.googleapis.com','storage.googleapis.com')
+  foreach ($api in $apis) {
+    Write-Log INFO "Habilitando API: $api"
+    Invoke-Gcloud -Args @('services','enable',$api,'--project',$ProjectId) | Out-Null
+  }
+}
 
-Write-Host "Planificando..." -ForegroundColor Cyan
-terraform -chdir="$baseDir" plan
+function Ensure-StateBucket {
+  $b = Invoke-Gcloud -Args @('storage','buckets','list','--project',$ProjectId,'--filter',"name:$StateBucketName") -Json -ErrorAction SilentlyContinue
+  if (-not $b) {
+    Invoke-Gcloud -Args @('storage','buckets','create',"gs://$StateBucketName",'--project',$ProjectId,'--uniform-bucket-level-access') | Out-Null
+    Invoke-Gcloud -Args @('storage','buckets','update',"gs://$StateBucketName",'--versioning') | Out-Null
+    $policy = '{"rule":[{"action":{"type":"Delete"},"condition":{"isLive":false,"age":30}}]}'
+    $tmp = New-TemporaryFile
+    $policy | Out-File -FilePath $tmp -Encoding utf8
+    Invoke-Gcloud -Args @('storage','buckets','set-lifecycle',"gs://$StateBucketName",'--lifecycle-file',$tmp) | Out-Null
+    Remove-Item $tmp -Force
+  } else { Write-Log INFO "Bucket ya existe: gs://$StateBucketName" }
+}
 
-if (Confirm-Action "Â¿Aplicar ahora (crear VPC+Subnet+Firewall+VM)?") {
-  terraform -chdir="$baseDir" apply -auto-approve
-  try { $ip = terraform -chdir="$baseDir" output -raw vm_ip } catch { $ip = "" }
+function Ensure-ServiceAccount {
+  $saEmail = "$SaName@$ProjectId.iam.gserviceaccount.com"
+  $exists = Invoke-Gcloud -Args @('iam','service-accounts','list','--project',$ProjectId,'--filter',"email:$saEmail") -Json
+  if (-not $exists) {
+    Invoke-Gcloud -Args @('iam','service-accounts','create',$SaName,'--display-name',$SaDisplay,'--project',$ProjectId) | Out-Null
+  }
+  foreach ($r in @('roles/compute.admin','roles/iam.serviceAccountUser','roles/storage.admin')) {
+    Invoke-Gcloud -Args @('projects','add-iam-policy-binding',$ProjectId,'--member',"serviceAccount:$saEmail",'--role',$r,'--quiet') | Out-Null
+  }
+  return $saEmail
+}
 
-  if ($osType -eq "windows") {
+function Ensure-TfScaffold {
+  if (-not (Test-Path -LiteralPath $WorkDir)) { New-Item -ItemType Directory -Path $WorkDir | Out-Null }
+  # Files without L/W prefixes; differentiation is by folder (PW-windows-<suffix> or Linux-<suffix>)
+  
+  $backendTf = @"
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    google = { source = "hashicorp/google", version = ">= 5.30" }
+  }
+  backend "gcs" {
+    bucket = "$StateBucketName"
+    prefix = "$StatePrefix"
+  }
+}
+"@
+
+  $providersTf = @"
+provider "google" {
+  project = "$ProjectId"
+  region  = "$Region"
+  zone    = "$Zone"
+}
+"@
+
+  $networkTf = @"
+resource "google_compute_network" "vpc" {
+  name                    = "${Prefix}-vpc"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "subnet" {
+  name          = "${Prefix}-subnet"
+  ip_cidr_range = "$SubnetCidr"
+  region        = "$Region"
+  network       = google_compute_network.vpc.id
+}
+
+resource "google_compute_firewall" "allow" {
+  name    = "${Prefix}-allow"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = [${OpenTcp | ForEach-Object { '"' + $_ + '"' } -join ', '}]
+  }
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["${Prefix}"]
+}
+"@
+
+  $vmTf = @"
+resource "google_compute_instance" "vm" {
+  name         = "${Prefix}-vm"
+  machine_type = "$MachineType"
+  zone         = "$Zone"
+  tags         = ["${Prefix}"]
+
+  boot_disk {
+    initialize_params {
+      image = "$ImageProject/$ImageFamily"
+      ${if ($OsDiskGb -gt 0) { "size = $OsDiskGb" } else { '' }}
+      type  = "pd-balanced"
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.subnet.id
+    access_config {}
+  }
+
+  metadata = ${if ($OsType -eq 'linux') { '{
+    enable-oslogin = "TRUE"
+  }' } else { '{}' }}
+}
+"@
+
+  $outputsTf = @'
+output "vm_ip" {
+  value = google_compute_instance.vm.network_interface[0].access_config[0].nat_ip
+}
+'@
+
+  Set-Content -Path (Join-Path $WorkDir 'backend.tf')   -Value $backendTf   -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir 'providers.tf') -Value $providersTf -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir 'network.tf')   -Value $networkTf   -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir 'vm.tf')        -Value $vmTf        -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir 'outputs.tf')   -Value $outputsTf   -Encoding utf8
+}
+"@
+
+  $providersTf = @"
+provider "google" {
+  project = "$ProjectId"
+  region  = "$Region"
+  zone    = "$Zone"
+}
+"@
+
+  $networkTf = @"
+resource "google_compute_network" "vpc" {
+  name                    = "${Prefix}-vpc"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "subnet" {
+  name          = "${Prefix}-subnet"
+  ip_cidr_range = "$SubnetCidr"
+  region        = "$Region"
+  network       = google_compute_network.vpc.id
+}
+
+resource "google_compute_firewall" "allow" {
+  name    = "${Prefix}-allow"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = [${OpenTcp | ForEach-Object { '"' + $_ + '"' } -join ', '}]
+  }
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["${Prefix}"]
+}
+"@
+
+  $vmTf = @"
+resource "google_compute_instance" "vm" {
+  name         = "${Prefix}-vm"
+  machine_type = "$MachineType"
+  zone         = "$Zone"
+  tags         = ["${Prefix}"]
+
+  boot_disk {
+    initialize_params {
+      image = "$ImageProject/$ImageFamily"
+      ${if ($OsDiskGb -gt 0) { "size = $OsDiskGb" } else { '' }}
+      type  = "pd-balanced"
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.subnet.id
+    access_config {}
+  }
+
+  metadata = ${if ($OsType -eq 'linux') { '{
+    enable-oslogin = "TRUE"
+  }' } else { '{}' }}
+}
+"@
+
+  $outputsTf = @'
+output "vm_ip" {
+  value = google_compute_instance.vm.network_interface[0].access_config[0].nat_ip
+}
+'@
+
+  Set-Content -Path (Join-Path $WorkDir ("${prefix}backend.tf"))   -Value $backendTf   -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir ("${prefix}providers.tf")) -Value $providersTf -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir ("${prefix}network.tf"))   -Value $networkTf   -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir ("${prefix}vm.tf"))        -Value $vmTf        -Encoding utf8
+  Set-Content -Path (Join-Path $WorkDir ("${prefix}outputs.tf"))   -Value $outputsTf   -Encoding utf8
+}
+
+# --- Terraform pipeline ---
+function Run-Terraform {
+  Push-Location $WorkDir
+  try {
+  # === Captura interactiva si faltan parámetros clave (SO, imagen, tipo y disco) ===
+  if (-not $PSBoundParameters.ContainsKey('OsType') -or -not $PSBoundParameters.ContainsKey('ImageFamily') -or -not $PSBoundParameters.ContainsKey('ImageProject') -or -not $PSBoundParameters.ContainsKey('OsDiskGb')) {
+    $os = Select-Os
+    $OsType       = $os.type
+    $ImageFamily  = $os.family
+    $ImageProject = $os.project
+    if (-not $PSBoundParameters.ContainsKey('OsDiskGb') -or $OsDiskGb -le 0) { $OsDiskGb = [int]$os.minDisk }
+  }
+  if (-not $PSBoundParameters.ContainsKey('MachineType')) { $MachineType = Select-MachineType }
+  if (-not $PSBoundParameters.ContainsKey('StatePrefix') -or $StatePrefix -eq 'env/default') { $StatePrefix = ($OsType -eq 'windows') ? 'env/windows' : 'env/linux' }
+
+  # === Selección de carpeta de trabajo (después de decidir SO) ===
+  if ($Test) {
+    $WorkDir = Join-Path $env:TEMP ("iac-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    Write-Log INFO "Modo -Test: usando carpeta temporal $WorkDir"
+  } else {
+    # Base ./terraform and a fixed OS prefix; only the suffix is user-provided
+    $base = Join-Path (Resolve-Path '.').Path 'terraform'
+    if (-not (Test-Path -LiteralPath $base)) { New-Item -ItemType Directory -Path $base -Force | Out-Null }
+    if (-not $PSBoundParameters.ContainsKey('EnvNameSuffix') -or [string]::IsNullOrWhiteSpace($EnvNameSuffix)) {
+      $EnvNameSuffix = Ask 'Nombre del entorno (solo sufijo, p.ej. "prod", "web", "lab")' 'default'
+    }
+    $fixedPrefix = ($OsType -eq 'windows') ? 'PW-windows-' : 'Linux-'
+    $dirName = $fixedPrefix + $EnvNameSuffix
+    $WorkDir = Join-Path $base $dirName
+    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    Write-Log INFO ("Modo real: carpeta ./terraform/{0}" -f $dirName)
+  }
+  }
+
+    Invoke-Terraform -Args @('init','-upgrade')
+    Invoke-Terraform -Args @('validate')
+    Invoke-Terraform -Args @('plan','-out=.tfplan','-parallelism',$TfParallelism)
+    if ($AutoApprove) {
+      if ($PSCmdlet.ShouldProcess('infra','terraform apply')) {
+        Invoke-Terraform -Args @('apply','-parallelism',$TfParallelism,'-auto-approve')
+      }
+    } else {
+      Write-Host ""; $ans = Read-Host "¿Aplicar cambios? (y/N)"
+      if ($ans -match '^(y|yes|s|si)$') {
+        if ($PSCmdlet.ShouldProcess('infra','terraform apply')) {
+          Invoke-Terraform -Args @('apply','-parallelism',$TfParallelism)
+        }
+      } else {
+        Write-Log WARN 'OK. No se aplicaron cambios.'
+      }
+    }
+  }
+  finally { Pop-Location }
+}
+
+# --- Mostrar resultados de Terraform (solo entorno real) ---
+function Show-Outputs {
+  if ($Test) { return }
+  try {
+    Push-Location $WorkDir
+    $ip = (& $script:Terraform output -raw vm_ip 2>$null)
+  } catch { $ip = $null } finally { Pop-Location }
+
+  if ($OsType -eq 'windows') {
     Write-Host ""
     Write-Host "[i] Credenciales Windows:" -ForegroundColor Yellow
-    Write-Host ("    gcloud compute reset-windows-password {0}-vm --zone {1} --user admin" -f $prefix, $zone)
-    if ($ip) { Write-Host ("    ConÃ©ctate por RDP a: {0}:3389" -f $ip) }
+    Write-Host ("    gcloud compute reset-windows-password {0}-vm --zone {1} --user admin" -f $Prefix, $Zone)
+    if ($ip) { Write-Host ("    Conéctate por RDP a: {0}:3389" -f $ip) }
   } else {
     if ($ip) {
       Write-Host ""
-      Write-Host ("SSH (OS Login): gcloud compute ssh {0}-vm --zone {1}" -f $prefix, $zone) -ForegroundColor Yellow
+      Write-Host ("SSH (OS Login): gcloud compute ssh {0}-vm --zone {1}" -f $Prefix, $Zone) -ForegroundColor Yellow
     }
   }
-} else {
-  Write-Host "OK. No se aplicaron cambios." -ForegroundColor Yellow
 }
+
+try {
+  if ($Test) {
+    $WorkDir = Join-Path $env:TEMP ("iac-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    Write-Log INFO "Modo -Test: usando carpeta temporal $WorkDir"
+  } else {
+    $dirName = if ($OsType -eq 'windows') { 'Windows-terraform' } else { 'Linux-terraform' }
+    $WorkDir = Join-Path (Resolve-Path '.').Path $dirName
+    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    Write-Log INFO ("Modo real: carpeta ./{0}" -f $dirName)
+  }
+
+  Ensure-ProjectContext
+  if ($Test) { Write-Log INFO 'Modo -Test: solo validaciones de API y contexto.' }
+  Enable-RequiredApis
+  Ensure-StateBucket
+  $sa = Ensure-ServiceAccount
+
+  if ($Test) {
+    Write-Log INFO "Test OK — Project=$ProjectId, Zone=$Zone, SA=$sa, Bucket=gs://$StateBucketName"
+    return
+  }
+
+  Ensure-TfScaffold
+Write-Log INFO 'Terraform scaffold creado.'
+Run-Terraform
+Show-Outputs
+  Write-Log INFO 'Finalizado sin errores.'
+}
+catch { Write-Log ERROR $_.Exception.Message; throw }
+finally {
+  if ($Test -and (Test-Path -LiteralPath $WorkDir)) {
+    try { Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction Stop; Write-Log INFO "Carpeta temporal eliminada: $WorkDir" } catch { Write-Log WARN "No se pudo borrar $WorkDir: $($_.Exception.Message)" }
+  }
+}
+
